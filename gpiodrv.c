@@ -25,19 +25,64 @@
 #include <asm/io.h>  
 #include <asm/mach-types.h>
   
-#define DEV_NAME      "gpiodrv"   
+#define DEV_NAME      "ctrl_gpio"   
 #define DEV_MAJOR     0         
 #define DEBUG_ON      1           
-                                
-#define gpiodrv_dbg(fmt,arg...)     if(DEBUG_ON) printk("== gpiodrv debug == " fmt, ##arg)
+#define IO_GET_STATUS		0x1234                              
+#define gpiodrv_dbg(fmt,arg...)     if(DEBUG_ON) printk("== gpiodrv == " fmt, ##arg)
 
 static int      gpiodrv_major = DEV_MAJOR;
 static dev_t    dev;
 static struct   cdev gpiodrv_cdev;
 static struct   class *gpiodrv_class;
+struct device *gpio_dev; 
 
+enum
+{
+	UART1_DISABLE		=0x00001100,UART_RFID,UART_SCAN,UART_LDTONG,UART_MAGCARD,
+	UART3_DISABLE		=0x00000110,UART_FINGER,UART_LEDDISP,UART_PRINTER,
+	DISP_PWR_LOW		=0x00000120,DISP_PWR_HIGH,
+	FINGER_PWR_LOW	=0x00000130,FINGER_PWR_HIGH,
+	FINGER_INT_VALUE=0x00000140,
+	USBKEY_PWR_LOW	=0x00000150,USBKEY_PWR_HIGH,
+	MAGCARD_PWR_LOW	=0x00000160,MAGCARD_PWR_HIGH,
+	LDTONG_PWR_LOW	=0x00000170,LDTONG_PWR_HIGH,
+	QX_PWR_LOW			=0x00000180,QX_PWR_HIGH,
+	RFID_PWR_LOW		=0x00000190,RFID_PWR_HIGH,
+	RFID_INT_VALUE	=0x000001A0,
+	SCAN_PWR_LOW		=0x000001B0,SCAN_PWR_HIGH,
+	SCAN_RST_LOW		=0x000001C0,SCAN_RST_HIGH,
+	SCAN_PWDN_LOW		=0x000001D0,SCAN_PWDN_HIGH,
+	SCAN_TRIG_LOW		=0x000001E0,SCAN_TRIG_HIGH,
+	PRINT_PWR_LOW		=0x000001F0,PRINT_PWR_HIGH,
+};
+
+enum
+{
+	eDISP_PWR			= 1<<0,
+	eFINGER_PWR		= 1<<1,
+	eFINGER_INT		= 1<<2,
+	eUSBKEY_PWR		= 1<<3,
+	eMAGCARD_PWR	= 1<<4,
+	eLDTONG_PWR		= 1<<5,
+	eQX_PWR				= 1<<6,
+	eRFID_PWR			= 1<<7,
+	eRFID_INT			= 1<<8,
+	eSCAN_PWR			= 1<<9,
+	eSCAN_RST			= 1<<10,
+	eSCAN_PWDN		= 1<<11,
+	eSCAN_TRIG		= 1<<12,
+	ePRINT_PWR		= 1<<13,
+	eUART_RFID		= 1<<14,
+	eUART_SCAN		= 1<<15,
+	eUART_LDTONG	= 1<<16,
+	eUART_MAGCARD	= 1<<17,
+	eUART_FINGER	= 1<<18,
+	eUART_LEDDISP	= 1<<19,
+	eUART_PRINTER	= 1<<20,
+};
 //--------------------------------------------------------------------
-//0:0->RFID; 0:1->LDTONG; 1:0->1D/2D; 1:1->IC CARD
+//SEL1:SEL0; 0:0->RFID; 0:1->1D/2D; 1:0->LDTONG; 1:1->IC CARD
 #define UART1_EN		RK30_PIN1_PA6
 #define UART1_EN_IOMUX	GPIO1A6_UART1CTSN_SPI0RXD_NAME
 #define UART1_SEL0	RK30_PIN1_PA7
@@ -47,7 +92,7 @@ static struct   class *gpiodrv_class;
 //--------------------------------------------------------------------
 
 //--------------------------------------------------------------------
-//0:0->finger; 0:1->custom display; 1:0->printer
+//SEL1:SEL0; 0:0->finger; 0:1->custom display; 1:0->printer
 #define UART3_EN		RK30_PIN0_PD4
 #define UART3_EN_IOMUX	GPIO0D4_I2S22CHSDI_SMCADDR0_NAME
 #define UART3_SEL0	RK30_PIN0_PD2
@@ -58,8 +103,8 @@ static struct   class *gpiodrv_class;
 
 //--------------------------------------------------------------------
 //custom display led control
-#define LEDKX_PWR		RK30_PIN4_PD3
-#define LEDKX_PWR_IOMUX	GPIO4D3_SMCDATA11_TRACEDATA11_NAME
+#define DISP_PWR		RK30_PIN4_PD3
+#define DISP_PWR_IOMUX	GPIO4D3_SMCDATA11_TRACEDATA11_NAME
 //--------------------------------------------------------------------
 
 //--------------------------------------------------------------------
@@ -75,8 +120,8 @@ static struct   class *gpiodrv_class;
 //--------------------------------------------------------------------
 
 //--------------------------------------------------------------------
-#define CARD_PWR		RK30_PIN4_PC4
-#define CARD_PWR_IOMUX	GPIO4C4_SMCDATA4_TRACEDATA4_NAME
+#define MAGCARD_PWR		RK30_PIN4_PC4
+#define MAGCARD_PWR_IOMUX	GPIO4C4_SMCDATA4_TRACEDATA4_NAME
 //--------------------------------------------------------------------
 
 //--------------------------------------------------------------------
@@ -111,13 +156,14 @@ static struct   class *gpiodrv_class;
 #define PRINT_PWR		RK30_PIN2_PC0
 #define PRINT_PWR_IOMUX	GPIO2C0_LCDCDATA16_GPSCLK_HSADCCLKOUT_NAME
 //--------------------------------------------------------------------
-
+static unsigned int status=0;
 //  ************************************************************ //
 //  Device Open : 
 //  ************************************************************ //
 static int gpiodrv_open (struct inode *inode, struct file *filp)  
 {
-    return 0;  
+	gpiodrv_dbg("------%s------\n",__func__);
+  return 0;  
 }
 
 //  ************************************************************ //
@@ -125,9 +171,21 @@ static int gpiodrv_open (struct inode *inode, struct file *filp)
 //  ************************************************************ //
 static int gpiodrv_release (struct inode *inode, struct file *filp)  
 {  
-    return 0;  
+	gpiodrv_dbg("------%s------\n",__func__);
+  return 0;  
 }  
   
+static ssize_t gpiodrv_read (struct file *filp, char __user *buff, size_t length, loff_t *offset)
+{
+	gpiodrv_dbg("------%s------\n",__func__);
+	return 0;
+}
+
+static ssize_t gpiodrv_write (struct file *filp, const char __user *buff, size_t length, loff_t *offset)
+{
+	gpiodrv_dbg("------%s------\n",__func__);
+	return 0;
+}
 //  ************************************************************ //
 //  Device Release : 
 //  IO Control
@@ -136,15 +194,313 @@ static int gpiodrv_release (struct inode *inode, struct file *filp)
 static long gpiodrv_ioctl (/*struct inode *inode, */struct file *filp,
                            unsigned int cmd, unsigned long arg)  
 {
-    printk("gpiodrv_ioctl,cmd=%d,arg=0x%08x\n",cmd,arg);
+		unsigned long __user* argp = (unsigned long __user*)arg;
+		unsigned long io_level=0;
+    //printk("gpiodrv_ioctl,cmd=%d,arg=0x%08x\n",cmd,arg);
     switch( cmd )  
     {  
-        case 1 :
-            break;   
-        case 0 :
-            break;            
-        default :
-            break;
+        case UART1_DISABLE://disable uart1
+        	gpio_direction_output(UART1_EN,1);
+        	gpiodrv_dbg("disable uart1 port\n");
+        break;   
+        case UART_RFID:
+        case eUART_RFID:
+        	gpio_direction_output(UART1_EN,0);
+        	gpio_direction_output(UART1_SEL1,0);
+        	gpio_direction_output(UART1_SEL0,0);       	
+        	gpiodrv_dbg("switch uart1 to rfid\n");
+        break;            
+        case UART_SCAN:
+        case eUART_SCAN:
+        	gpio_direction_output(UART1_EN,0);
+        	gpio_direction_output(UART1_SEL1,0);
+        	gpio_direction_output(UART1_SEL0,1);       	
+        	gpiodrv_dbg("switch uart1 to 1d/2d bar code\n");
+        break;            
+        case UART_LDTONG:
+        case eUART_LDTONG:
+        	gpio_direction_output(UART1_EN,0);
+        	gpio_direction_output(UART1_SEL1,1);
+        	gpio_direction_output(UART1_SEL0,0);       	
+        	gpiodrv_dbg("switch uart1 to lai-dian-tong\n");
+        break;            
+        case UART_MAGCARD:
+        case eUART_MAGCARD:
+        	gpio_direction_output(UART1_EN,0);
+        	gpio_direction_output(UART1_SEL1,1);
+        	gpio_direction_output(UART1_SEL0,1);       	
+        	gpiodrv_dbg("switch uart1 to magcard\n");
+        break;            
+        case UART3_DISABLE :
+        	gpio_direction_output(UART3_EN,1);
+        	gpiodrv_dbg("disable uart3 port\n");
+        break;            
+        case UART_FINGER:
+        case eUART_FINGER:
+        	gpio_direction_output(UART3_EN,0);
+        	gpio_direction_output(UART3_SEL1,0);
+        	gpio_direction_output(UART3_SEL0,0);       	
+        	gpiodrv_dbg("switch uart1 to finger\n");
+        break;            
+        case UART_LEDDISP:
+        case eUART_LEDDISP:
+        	gpio_direction_output(UART3_EN,0);
+        	gpio_direction_output(UART3_SEL1,0);
+        	gpio_direction_output(UART3_SEL0,1);       	
+        	gpiodrv_dbg("switch uart1 to led custom display\n");
+        break;            
+        case UART_PRINTER:
+        case eUART_PRINTER:
+        	gpio_direction_output(UART3_EN,0);
+        	gpio_direction_output(UART3_SEL1,1);
+        	gpio_direction_output(UART3_SEL0,0);       	
+        	gpiodrv_dbg("switch uart1 to printer\n");
+        break;            
+        case eDISP_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(DISP_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set DISP_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eDISP_PWR;
+        	if (io_level)
+        	{
+        		status |= eDISP_PWR;
+        	}
+        break;            
+        case eFINGER_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(FINGER_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set FINGER_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eFINGER_PWR;
+        	if (io_level)
+        	{
+        		status |= eFINGER_PWR;
+        	}
+        break;            
+        case eFINGER_INT:
+        	io_level = (unsigned long)gpio_get_value(FINGER_INT);
+        	io_level = !!io_level;
+        	if (io_level)
+        	{
+        		gpiodrv_dbg("get FINGER_INT_VALUE high\n");
+	        	status |= eFINGER_INT;
+        	}
+        	else
+        	{
+        		gpiodrv_dbg("get FINGER_INT_VALUE low\n");
+	        	status &= ~eFINGER_INT;
+        	}
+        break;            
+        case eUSBKEY_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(USBKEY_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set USBKEY_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eUSBKEY_PWR;
+        	if (io_level)
+        	{
+        		status |= eUSBKEY_PWR;
+        	}
+        break;            
+        case eMAGCARD_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(MAGCARD_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set MAGCARD_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eMAGCARD_PWR;
+        	if (io_level)
+        	{
+        		status |= eMAGCARD_PWR;
+        	}
+        break;            
+        case eLDTONG_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(LDTONG_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set LDTONG_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eLDTONG_PWR;
+        	if (io_level)
+        	{
+        		status |= eLDTONG_PWR;
+        	}
+        break;            
+        case eQX_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(QX_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set QX_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eQX_PWR;
+        	if (io_level)
+        	{
+        		status |= eQX_PWR;
+        	}
+        break;            
+        case eRFID_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(RFID_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set RFID_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eRFID_PWR;
+        	if (io_level)
+        	{
+        		status |= eRFID_PWR;
+        	}
+        break;            
+        case eRFID_INT:
+        	io_level = (unsigned long)gpio_get_value(RFID_INT);
+        	io_level = !!io_level;
+        	if (io_level)
+        	{
+        		gpiodrv_dbg("get RFID_INT_VALUE high\n");
+        		status |= eRFID_INT;
+        	}
+        	else
+        	{
+        		gpiodrv_dbg("get RFID_INT_VALUE low\n");
+        		status &= ~eRFID_INT;
+        	}
+        break;            
+        case eSCAN_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(SCAN_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set SCAN_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~eSCAN_PWR;
+        	if (io_level)
+        	{
+        		status |= eSCAN_PWR;
+        	}
+        break;            
+        case eSCAN_RST:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(SCAN_RST,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set SCAN_RST %s\n",io_level ? "high" : "low");
+        	status &= ~eSCAN_RST;
+        	if (io_level)
+        	{
+        		status |= eSCAN_RST;
+        	}
+        break;            
+        case eSCAN_PWDN :
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(SCAN_PWDN,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set SCAN_PWDN %s\n",io_level ? "high" : "low");
+        	status &= ~eSCAN_PWDN;
+        	if (io_level)
+        	{
+        		status |= eSCAN_PWDN;
+        	}
+        break;            
+        case eSCAN_TRIG :
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(SCAN_TRIG,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set SCAN_TRIG %s\n",io_level ? "high" : "low");
+        	status &= ~eSCAN_TRIG;
+        	if (io_level)
+        	{
+        		status |= eSCAN_TRIG;
+        	}
+        break;            
+        case ePRINT_PWR:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+					if (copy_from_user(&io_level, argp, sizeof(io_level)))
+					{
+						return -EFAULT;
+					}
+        	gpio_direction_output(PRINT_PWR,io_level ? 1 : 0);       	
+        	gpiodrv_dbg("set PRINT_PWR %s\n",io_level ? "high" : "low");
+        	status &= ~ePRINT_PWR;
+        	if (io_level)
+        	{
+        		status |= ePRINT_PWR;
+        	}
+        break; 
+        case IO_GET_STATUS:
+        	if (argp == 0)
+        	{
+        		return -EFAULT;
+        	}
+        	io_level = (unsigned long)status;
+        	if (copy_to_user(argp,&io_level,sizeof(io_level)))
+        	{
+        		return -EFAULT;
+        	}
+        break;           
+        default:
+        break;
     };
     return 0;  
 }  
@@ -157,15 +513,65 @@ static struct file_operations gpiodrv_fops =
     .owner    = THIS_MODULE,  
     .unlocked_ioctl = gpiodrv_ioctl,  
     .open     = gpiodrv_open,       
-    .release  = gpiodrv_release,    
+    .release  = gpiodrv_release, 
+    .read     = gpiodrv_read,
+    .write    = gpiodrv_write,   
 };  
+
+
+
+static u32 StrtoInt(const char *str)
+{
+	u32 i,HexValue=0;
+		
+	//printk("strtoin=%s \n",str);
+	if(!str)
+	{
+		printk("%s(): NULL pointer input\n", __FUNCTION__);
+		return -1;
+	}
+	for(i=0; *str; str++)
+	{
+		if((*str>='A' && *str<='F')||(*str>='a' && *str<='f')||(*str>='0' && *str<='9'))
+		{
+			 HexValue <<= 4;
+			if(*str>='A' && *str<='F')
+				HexValue += *str-'A'+10;
+			else if(*str>='a' && *str<='f')
+				HexValue += *str-'a'+10;
+			else if(*str>='0' && *str<='9')
+				HexValue += *str-'0';				
+		}
+		else
+				return HexValue;
+	}
+	return HexValue;
+}
+
+static u32 io_num=0;
+
+static ssize_t gpio_switch_show(struct device *dev,struct device_attribute *attr ,char *buf)
+{
+	return sprintf(buf,"%04x\n",io_num);
+}
+
+static ssize_t gpio_switch_store(struct device *dev,struct device_attribute *attr, const char *buf,size_t count)
+{
+	u32 val=0,io_level=0;
+	//printk("store buf=%s \n",buf);	
+	val=(u32)StrtoInt(buf);
+	gpiodrv_ioctl(0,val,(u32)&io_level);
+	return count;
+} 
+
+static DEVICE_ATTR(gpio_switch, 0666, gpio_switch_show, gpio_switch_store);
 
 //  ************************************************************ //
 //  Device Init :
 //  ************************************************************ //
 static int __init gpiodrv_init(void)  
-{  
-    int result;  
+{ 
+  int result;  
 	if (0 == gpiodrv_major)
 	{
 		/* auto select a major */
@@ -193,12 +599,14 @@ static int __init gpiodrv_init(void)
 		printk("Error registrating device object with the kernel\n");
 	}
 
-    gpiodrv_class = class_create(THIS_MODULE, DEV_NAME);
-    device_create(gpiodrv_class, NULL, MKDEV(gpiodrv_major, MINOR(dev)), NULL,
-                  DEV_NAME);
+  gpiodrv_class = class_create(THIS_MODULE, DEV_NAME);
+  gpio_dev = device_create(gpiodrv_class, NULL, MKDEV(gpiodrv_major, MINOR(dev)), NULL,DEV_NAME);
 
-    if (result < 0)
-        return result;  
+	result = device_create_file(gpio_dev, &dev_attr_gpio_switch);
+	if (result != 0) {
+		printk("Failed to create gpio_switch sysfs files: %d\n", result);
+		return result;
+	}
 
 #ifdef UART1_EN_IOMUX
 		rk30_mux_api_set(UART1_EN_IOMUX,0);
@@ -266,16 +674,16 @@ static int __init gpiodrv_init(void)
 		}
 		gpio_direction_output(UART3_SEL1,0);
 
-#ifdef LEDKX_PWR_IOMUX
-		rk30_mux_api_set(LEDKX_PWR_IOMUX,0);
+#ifdef DISP_PWR_IOMUX
+		rk30_mux_api_set(DISP_PWR_IOMUX,0);
 #endif
-		result = gpio_request(LEDKX_PWR,NULL);
+		result = gpio_request(DISP_PWR,NULL);
 		if (result < 0 )
 		{
-			printk("gpio_request LEDKX_PWR failed\n");
+			printk("gpio_request DISP_PWR failed\n");
 			return result;
 		}
-		gpio_direction_output(LEDKX_PWR,0);
+		gpio_direction_output(DISP_PWR,0);
 
 #ifdef FINGER_PWR_IOMUX
 		rk30_mux_api_set(FINGER_PWR_IOMUX,0);
@@ -310,16 +718,16 @@ static int __init gpiodrv_init(void)
 		}
 		gpio_direction_output(USBKEY_PWR,0);
 
-#ifdef CARD_PWR_IOMUX
-		rk30_mux_api_set(CARD_PWR_IOMUX,0);
+#ifdef MAGCARD_PWR_IOMUX
+		rk30_mux_api_set(MAGCARD_PWR_IOMUX,0);
 #endif
-		result = gpio_request(CARD_PWR,NULL);
+		result = gpio_request(MAGCARD_PWR,NULL);
 		if (result < 0 )
 		{
-			printk("gpio_request CARD_PWR failed\n");
+			printk("gpio_request MAGCARD_PWR failed\n");
 			return result;
 		}
-		gpio_direction_output(CARD_PWR,0);
+		gpio_direction_output(MAGCARD_PWR,0);
 
 #ifdef LDTONG_PWR_IOMUX
 		rk30_mux_api_set(LDTONG_PWR_IOMUX,0);
@@ -420,7 +828,6 @@ static int __init gpiodrv_init(void)
 		}
 		gpio_direction_output(PRINT_PWR,0);
 
-
     gpiodrv_dbg("gpio driver loaded\n");
 
     return 0;  
@@ -431,7 +838,7 @@ static int __init gpiodrv_init(void)
 //  ************************************************************ //
 static void __exit gpiodrv_exit(void)  
 {  
-
+		device_remove_file(gpio_dev,&dev_attr_gpio_switch);
     device_destroy(gpiodrv_class, MKDEV(gpiodrv_major, 0));
     class_destroy(gpiodrv_class);
 
