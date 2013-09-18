@@ -192,7 +192,7 @@ static int native_get_status(JNIEnv *env, jobject thiz,int type)
 
 //=======================================================================
 
-static const char *classPathName = "com/ctrl/gpio";
+static const char *classPathName = "com/ctrl/gpio/Ioctl";
 
 static JNINativeMethod methods[] = {
   {"convertRfid", "()I", (void*)native_convertRfid },
