@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">ChangePass</string>
+    <string name="action_settings">Settings</string>
+    <string name="currPass">Input Password：</string>
+    <string name="newPass">Input New Password：</string>
+    <string name="newPassCon">Input New Password Again：</string>
+    <string name="ok">OK</string>
+    <string name="changeSuc">Success!</string>
+    <string name="newPassError">New Password Is Invalid!</string>
+    <string name="passNoMatch">The two passwords differ!</string>
+    <string name="currPassError">The current password input error!</string>
+    
+    <string name="firstCurrPass">Input Current Password First</string>
+    <string name="lateNewPass">Input New Password</string>
+    <string name="againNewPass">Input New Password Again</string>
+</resources>

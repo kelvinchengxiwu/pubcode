@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">ChangePass</string>
+    <string name="action_settings">Settings</string>
+    <string name="currPass">请输入当前密码：</string>
+    <string name="newPass">请输入新密码：</string>
+    <string name="newPassCon">请再次输入新密码：</string>
+    <string name="ok">确定</string>
+    <string name="changeSuc">密码修改成功!</string>
+    <string name="newPassError">新密码输入为空!</string>
+    <string name="passNoMatch">两次新密码输入不一致!</string>
+    <string name="currPassError">当前密码输入错误!</string>
+    
+    <string name="firstCurrPass">请先输入当前密码</string>
+    <string name="lateNewPass">请输入新密码</string>
+    <string name="againNewPass">请再次输入新密码</string>
+
+</resources>
